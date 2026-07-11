@@ -73,25 +73,4 @@ only uses standard SystemVerilog constructs.
     address held by both caches, it flags a violation if one core is in `M`
     while the other is not `I` (the fundamental MSI mutual-exclusion rule).
 
-### Note on the concurrency scenario
-
-Scenario 11 (true same-cycle contention) actually caught a genuine RTL bug
-during development: the bus's memory-write logic wasn't gated to the `BMEM`
-state, so on two back-to-back transactions with *different* snoop outcomes,
-stale snoop-result registers from the previous transaction could briefly
-leak through and corrupt an unrelated memory address. It's fixed in
-`coherence_bus.sv` (see the comment there) — a good example of why
-concurrent/back-to-back stress scenarios matter even after directed tests
-all pass.
-
-## Resume bullet suggestions
-
-- Implemented a snooping-based MSI cache-coherence mechanism for a dual-core
-  system in SystemVerilog, including a round-robin bus arbiter and
-  dirty-line eviction/writeback handling.
-- Developed a self-checking verification testbench (12 scenarios, 45
-  assertions) validating MSI state transitions, read/write hits and misses,
-  inter-core invalidation/downgrade, and a cycle-accurate background
-  invariant monitor for MSI mutual exclusion — which surfaced and helped
-  root-cause a real RTL race condition under concurrent bus contention.
 
