@@ -1,0 +1,121 @@
+
+================================================================
+ Dual-Core MSI Cache Coherence -- Self-Checking Testbench
+================================================================
+
+-- Scenario 0: Reset state --
+  [PASS]                       core0 line0 reset state state=I
+  [PASS]                       core1 line0 reset state state=I
+  [PASS]                       core0 line1 reset state state=I
+  [PASS]                       core1 line1 reset state state=I
+  [PASS]                       core0 line2 reset state state=I
+  [PASS]                       core1 line2 reset state state=I
+  [PASS]                       core0 line3 reset state state=I
+  [PASS]                       core1 line3 reset state state=I
+
+-- Scenario 1: core0 PrRd(A) -- cold read miss --
+  [PASS]              core0 read miss returns mem[A]=4 actual=0x4
+  [PASS]              core0 read miss reported as MISS actual=0x0
+  [PASS]             core0 line0 state after read miss state=S
+  [PASS]               core0 line0 tag after read miss actual=0x1
+
+-- Scenario 2: core1 PrRd(A) -- shared read, no invalidation --
+  [PASS]                   core1 read returns mem[A]=4 actual=0x4
+  [PASS]                  core1 line0 state after read state=S
+  [PASS]             core0 line0 STILL Shared (no inv) state=S
+
+-- Scenario 3: core0 PrWr(A,0xAA) -- upgrade S->M, invalidate core1 --
+  [PASS]                 core0 upgrade reported as HIT actual=0x1
+  [PASS]          core0 line0 state == M after upgrade state=M
+  [PASS]                      core0 line0 data == 0xAA actual=0xaa
+  [PASS]            core1 line0 INVALIDATED by upgrade state=I
+
+-- Scenario 4: core0 PrWr(B,0xCC) -- write miss forces eviction+writeback of dirty A --
+  [PASS]             core0 write-miss reported as MISS actual=0x0
+  [PASS]          core0 line0 state == M (now holds B) state=M
+  [PASS]                   core0 line0 tag == tag(B)=2 actual=0x2
+  [PASS]                      core0 line0 data == 0xCC actual=0xcc
+  [PASS]    main memory[A] updated by writeback (0xAA) actual=0xaa
+
+-- Scenario 4b: core0 PrRd(B) -- must HIT in cache, no bus transaction --
+  [PASS]                   core0 re-read of B is a HIT actual=0x1
+  [PASS]               core0 re-read of B returns 0xCC actual=0xcc
+  [PASS]        bus transaction count unchanged on hit actual=0x5
+
+-- Scenario 5: core1 PrRd(A) -- core0 evicted A, memory serves the written-back value --
+  [PASS]  core1 reads back the WRITTEN-BACK value 0xAA actual=0xaa
+  [PASS]                        core1 line0 state == S state=S
+
+-- Scenario 6: core1 PrWr(A,0x77) -- upgrade S->M --
+  [PASS]                        core1 line0 state == M state=M
+  [PASS]                      core1 line0 data == 0x77 actual=0x77
+
+-- Scenario 7: core0 PrRd(E) -- independent cold line --
+  [PASS]                          core0 reads mem[E]=5 actual=0x5
+  [PASS]                        core0 line1 state == S state=S
+
+-- Scenario 8: core0 PrWr(E,0x99) -- upgrade S->M --
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_dual_core_msi_behav' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for 1000ns
+launch_simulation: Time (s): cpu = 00:00:03 ; elapsed = 00:00:13 . Memory (MB): peak = 989.480 ; gain = 0.000
+run -all
+  [PASS]                        core0 line1 state == M state=M
+
+-- Scenario 9: core1 PrRd(E) -- remote read of Modified line (writeback + downgrade) --
+  [PASS]    core1 reads the DIRTY value 0x99 via snoop actual=0x99
+  [PASS]                   core0 line1 DOWNGRADED M->S state=S
+  [PASS]                        core1 line1 state == S state=S
+  [PASS]     main memory[E] updated by snoop writeback actual=0x99
+
+-- Scenario 10: bus transaction counter sanity --
+  [PASS] total bus transactions matches expected protocol trace actual=0xa
+
+-- Scenario 11: concurrent core0/core1 requests -- arbiter contention --
+  [PASS]       core0 concurrent read returns mem[0x32] actual=0x32
+  [PASS]       core1 concurrent read returns mem[0x33] actual=0x33
+  [PASS] bus transaction count after concurrent contention actual=0xc
+  [PASS]                   core0 line2 holds 0x32 as S state=S
+  [PASS]                core0 line2 DATA array == 0x32 actual=0x32
+  [PASS]                   core1 line3 holds 0x33 as S state=S
+
+-- Scenario 12: core1 PrRd(0x33) -- cache HIT (closes core1 RD:HIT coverage) --
+  [PASS]                core1 re-read of 0x33 is a HIT actual=0x1
+  [PASS]            core1 re-read of 0x33 returns 0x33 actual=0x33
+  [PASS]        bus transaction count unchanged on hit actual=0xc
+
+-- Scenario 13: core1 PrWr(0x34,0x44) -- write MISS (closes core1 WR:MISS coverage) --
+  [PASS]             core1 write-miss reported as MISS actual=0x0
+  [PASS]       core1 line0 state == M (now holds 0x34) state=M
+  [PASS]                      core1 line0 data == 0x44 actual=0x44
+
+================================================================
+ FUNCTIONAL COVERAGE REPORT
+================================================================
+
+-- 1. MSI state transition coverage --
+  I->S : 7 hits  [COVERED]
+  I->M : 2 hits  [COVERED]
+  S->M : 3 hits  [COVERED]
+  S->I : 1 hit  [COVERED]
+  M->S : 1 hit  [COVERED]
+  M->I : 2 hits  [COVERED]
+  -> 6 / 6 transition bins covered (100.0%)
+
+-- 2. Processor operation coverage --
+  core0:RD:MISS : 3 hits  [COVERED]
+  core0:RD: HIT : 1 hit  [COVERED]
+  core0:WR:MISS : 1 hit  [COVERED]
+  core0:WR: HIT : 2 hits  [COVERED]
+  core1:RD:MISS : 4 hits  [COVERED]
+  core1:RD: HIT : 1 hit  [COVERED]
+  core1:WR:MISS : 1 hit  [COVERED]
+  core1:WR: HIT : 1 hit  [COVERED]
+  -> 8 / 8 operation bins covered (100.0%)
+
+-- 3. Bus command coverage --
+     BusRd : 7 hits  [COVERED]
+    BusRdX : 2 hits  [COVERED]
+   BusUpgr : 3 hits  [COVERED]
+     BusWB : 2 hits  [COVERED]
+  -> 4 / 4 bus command bins covered (100.0%)
+================================================================
