@@ -29,25 +29,7 @@ mutual-exclusion invariant on **every clock cycle** of the run.
 
 ## Architecture
 
-```
-                 ┌───────────────────┐        ┌───────────────────┐
-                 │   cache_core #0    │        │   cache_core #1    │
-                 │  (4-line direct-   │        │  (4-line direct-   │
-                 │   mapped, MSI FSM) │        │   mapped, MSI FSM) │
-                 └─────────┬──────────┘        └──────────┬────────┘
-                           │  bus master / snoop            │
-                           └───────────────┬─────────────────┘
-                                            │
-                                 ┌──────────▼───────────┐
-                                 │    coherence_bus       │
-                                 │ (round-robin arbiter,  │
-                                 │  snoop broadcast)      │
-                                 └──────────┬───────────┘
-                                            │
-                                 ┌──────────▼───────────┐
-                                 │     main_memory        │
-                                 └────────────────────────┘
-```
+![Architecture diagram](diagrams/architecture.svg)
 
 - **Cache**: 4-line direct-mapped, 32-bit data, 8-bit address
   (`idx = addr[1:0]`, `tag = addr[7:2]`) — resizable via `msi_pkg.sv`.
@@ -65,6 +47,7 @@ mutual-exclusion invariant on **every clock cycle** of the run.
 | `dual_core_msi_top.sv`   | Top level: 2× `cache_core` + `coherence_bus`                     |
 | `tb_dual_core_msi.sv`    | Self-checking testbench (13 scenarios, 51 checks, coverage report)|
 | `msi_covergroups.sv`     | *(optional)* native SystemVerilog `covergroup`s for Vivado's Coverage Report GUI |
+| `diagrams/architecture.svg` | Architecture diagram (embedded above)                          |
 | `waveforms/`             | Simulation waveform screenshot(s) — see below                    |
 | `logs/`                  | Vivado TCL console / simulation transcript — see below            |
 
@@ -192,6 +175,6 @@ Full Vivado TCL console output / simulation transcript from a complete
   concrete example of coverage doing its job.
 
 
+## License
 
-
-
+MIT (or update to your preference).
