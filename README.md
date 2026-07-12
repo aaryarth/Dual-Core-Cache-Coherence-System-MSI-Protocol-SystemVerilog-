@@ -29,7 +29,7 @@ mutual-exclusion invariant on **every clock cycle** of the run.
 
 ## Architecture
 
-![Architecture diagram](diagrams/architecture.svg)
+![Architecture diagram](diagrams/architecture1.png)
 
 - **Cache**: 4-line direct-mapped, 32-bit data, 8-bit address
   (`idx = addr[1:0]`, `tag = addr[7:2]`) — resizable via `msi_pkg.sv`.
