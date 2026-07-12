@@ -147,6 +147,143 @@ module tb_dual_core_msi;
   end
 
   // ------------------------------------------------------------------
+  // Functional coverage (portable, self-reporting -- works in any
+  // simulator, no coverage database / GUI required).
+  //
+  // Tracks three independent axes, purely by OBSERVING the DUT rather
+  // than by asserting what the test intended, so it reflects what the
+  // hardware actually did. Implemented with plain indexed arrays (not
+  // associative arrays / dynamic string keys) for maximum simulator
+  // portability.
+  //   1. MSI state transitions (per line, per core) -- indexed [from][to]
+  //   2. Processor operation outcomes (RD/WR x HIT/MISS) -- per core
+  //   3. Bus command types actually arbitrated on the bus
+  // ------------------------------------------------------------------
+
+  // ---- 1. State-transition coverage ----
+  // Index by state value (I_STATE=0, S_STATE=1, M_STATE=2).
+  int unsigned trans_cov [3][3];
+  msi_state_t  prev_state0 [NUM_LINES];
+  msi_state_t  prev_state1 [NUM_LINES];
+
+  always @(posedge clk) begin
+    if (!rst_n) begin
+      for (int k = 0; k < NUM_LINES; k++) begin
+        prev_state0[k] = I_STATE;
+        prev_state1[k] = I_STATE;
+      end
+    end else begin
+      for (int k = 0; k < NUM_LINES; k++) begin
+        if (dbg_state0[k] !== prev_state0[k]) begin
+          trans_cov[prev_state0[k]][dbg_state0[k]]++;
+          prev_state0[k] = msi_state_t'(dbg_state0[k]);
+        end
+        if (dbg_state1[k] !== prev_state1[k]) begin
+          trans_cov[prev_state1[k]][dbg_state1[k]]++;
+          prev_state1[k] = msi_state_t'(dbg_state1[k]);
+        end
+      end
+    end
+  end
+
+  // ---- 2. Operation coverage ----
+  // op_cov[core][op][hit] : core 0/1, op 0=RD/1=WR, hit 0=MISS/1=HIT
+  int unsigned op_cov [2][2][2];
+
+  always @(posedge clk) begin
+    if (rst_n) begin
+      if (p0_resp_valid) op_cov[0][p0_req_op][p0_resp_hit]++;
+      if (p1_resp_valid) op_cov[1][p1_req_op][p1_resp_hit]++;
+    end
+  end
+
+  // ---- 3. Bus command coverage ----
+  // Indexed directly by the 3-bit bus_cmd_t value (CMD_NONE=0 unused,
+  // CMD_RD=1, CMD_RDX=2, CMD_UPGR=3, CMD_WB=4).
+  int unsigned bus_cmd_cov [5];
+
+  always @(posedge clk) begin
+    if (rst_n && dut.u_bus.bus_state_q == 3'd4 /* BRESP */)
+      bus_cmd_cov[dut.u_bus.tr_cmd_q]++;
+  end
+
+  function automatic string cmd_str(input int c);
+    case (c)
+      1: return "BusRd";
+      2: return "BusRdX";
+      3: return "BusUpgr";
+      4: return "BusWB";
+      default: return "?";
+    endcase
+  endfunction
+
+  task automatic print_coverage_report();
+    int covered, total;
+    real pct;
+    int legal_from [6];
+    int legal_to   [6];
+
+    legal_from[0] = 0; legal_to[0] = 1; // I->S
+    legal_from[1] = 0; legal_to[1] = 2; // I->M
+    legal_from[2] = 1; legal_to[2] = 2; // S->M
+    legal_from[3] = 1; legal_to[3] = 0; // S->I
+    legal_from[4] = 2; legal_to[4] = 1; // M->S
+    legal_from[5] = 2; legal_to[5] = 0; // M->I
+
+    $display("\n================================================================");
+    $display(" FUNCTIONAL COVERAGE REPORT");
+    $display("================================================================");
+
+    $display("\n-- 1. MSI state transition coverage --");
+    covered = 0; total = 6;
+    for (int i = 0; i < 6; i++) begin
+      automatic int unsigned n = trans_cov[legal_from[i]][legal_to[i]];
+      automatic string plural_s = (n==1) ? "" : "s";
+      automatic string cov_s    = (n>0)  ? "COVERED" : "NOT COVERED";
+      if (n > 0) covered++;
+      $display("  %s->%s : %0d hit%s  [%s]",
+               state_str(msi_state_t'(legal_from[i])), state_str(msi_state_t'(legal_to[i])),
+               n, plural_s, cov_s);
+    end
+    pct = 100.0 * covered / total;
+    $display("  -> %0d / %0d transition bins covered (%0.1f%%)", covered, total, pct);
+
+    $display("\n-- 2. Processor operation coverage --");
+    covered = 0; total = 8;
+    for (int c = 0; c < 2; c++) begin
+      for (int o = 0; o < 2; o++) begin
+        for (int h = 0; h < 2; h++) begin
+          automatic int unsigned n = op_cov[c][o][h];
+          automatic string op_s     = (o==0) ? "RD"  : "WR";
+          automatic string hit_s    = (h==1) ? "HIT" : "MISS";
+          automatic string plural_s = (n==1) ? "" : "s";
+          automatic string cov_s    = (n>0)  ? "COVERED" : "NOT COVERED";
+          if (n > 0) covered++;
+          $display("  core%0d:%s:%-4s : %0d hit%s  [%s]",
+                    c, op_s, hit_s, n, plural_s, cov_s);
+        end
+      end
+    end
+    pct = 100.0 * covered / total;
+    $display("  -> %0d / %0d operation bins covered (%0.1f%%)", covered, total, pct);
+
+    $display("\n-- 3. Bus command coverage --");
+    covered = 0; total = 4;
+    for (int i = 1; i <= 4; i++) begin
+      automatic int unsigned n = bus_cmd_cov[i];
+      automatic string plural_s = (n==1) ? "" : "s";
+      automatic string cov_s    = (n>0)  ? "COVERED" : "NOT COVERED";
+      if (n > 0) covered++;
+      $display("  %-8s : %0d hit%s  [%s]", cmd_str(i), n, plural_s, cov_s);
+    end
+    pct = 100.0 * covered / total;
+    $display("  -> %0d / %0d bus command bins covered (%0.1f%%)", covered, total, pct);
+
+    $display("================================================================");
+  endtask
+
+
+  // ------------------------------------------------------------------
   // Driver tasks
   // ------------------------------------------------------------------
   task automatic do_op(input int core_sel, input pr_op_t op,
@@ -325,8 +462,26 @@ module tb_dual_core_msi;
     check_eq   ("core0 line2 DATA array == 0x32", dbg_data0[2], 32'h32);
     check_state("core1 line3 holds 0x33 as S", dbg_state1[3], S_STATE);
 
+    // ---- Scenario 12: close remaining operation-coverage gaps ----
+    // core1:RD:HIT -- re-read a line core1 already holds valid.
+    $display("\n-- Scenario 12: core1 PrRd(0x33) -- cache HIT (closes core1 RD:HIT coverage) --");
+    do_op(1, PR_RD, 8'h33, '0, rdata, hit); // no new bus transaction expected
+    check_eq("core1 re-read of 0x33 is a HIT", hit, 1'b1);
+    check_eq("core1 re-read of 0x33 returns 0x33", rdata, 32'h33);
+    check_eq("bus transaction count unchanged on hit", stat_transactions, exp_tx);
+
+    // core1:WR:MISS -- write to a fresh-tag line that aliases core1's dirty
+    // A (idx0, still M from scenario 6): forces eviction+writeback, then
+    // BusRdX for the new address.
+    $display("\n-- Scenario 13: core1 PrWr(0x34,0x44) -- write MISS (closes core1 WR:MISS coverage) --");
+    do_op(1, PR_WR, 8'h34, 32'h44, rdata, hit); exp_tx += 2; // BusWB (evict dirty A) + BusRdX
+    check_eq   ("core1 write-miss reported as MISS", hit, 1'b0);
+    check_state("core1 line0 state == M (now holds 0x34)", dbg_state1[0], M_STATE);
+    check_eq   ("core1 line0 data == 0x44", dbg_data1[0], 32'h44);
+
     // ---- Final summary ----
     repeat (5) @(posedge clk);
+    print_coverage_report();
     $display("\n================================================================");
     $display(" RESULTS: %0d PASSED, %0d FAILED, %0d INVARIANT VIOLATIONS",
               pass_count, fail_count, invariant_violations);
