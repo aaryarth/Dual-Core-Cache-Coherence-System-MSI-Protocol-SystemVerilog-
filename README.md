@@ -168,8 +168,3 @@ Full Vivado TCL console output / simulation transcript from a complete
 - The functional coverage report caught two operation bins the original
   directed tests never exercised (`core1:RD:HIT`, `core1:WR:MISS`) — a good
   concrete example of coverage doing its job.
-
-
-## License
-
-MIT (or update to your preference).
