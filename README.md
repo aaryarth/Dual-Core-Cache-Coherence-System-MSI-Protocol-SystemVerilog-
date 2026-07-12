@@ -191,17 +191,7 @@ Full Vivado TCL console output / simulation transcript from a complete
   directed tests never exercised (`core1:RD:HIT`, `core1:WR:MISS`) — a good
   concrete example of coverage doing its job.
 
-## Resume bullet suggestions
 
-- Implemented a snooping-based MSI cache-coherence mechanism for a dual-core
-  system in SystemVerilog, including a round-robin bus arbiter and
-  dirty-line eviction/writeback handling, verified in Xilinx Vivado.
-- Developed a self-checking verification testbench (13 scenarios, 51
-  assertions, 100% functional coverage) validating MSI state transitions,
-  read/write hits and misses, inter-core invalidation/downgrade, and a
-  cycle-accurate background invariant monitor — which surfaced and helped
-  root-cause a real RTL race condition under concurrent bus contention.
 
-## License
 
-MIT (or update to your preference).
+
