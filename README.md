@@ -1,35 +1,117 @@
 # Dual-Core Cache Coherence System — MSI Protocol (SystemVerilog)
 
-A snooping-bus MSI cache-coherence implementation for a dual-core system,
-with a self-checking testbench. Written in SystemVerilog and verified with
-Icarus Verilog (`iverilog`/`vvp`).
+A snooping-bus **MSI cache-coherence** implementation for a dual-core system,
+built in SystemVerilog with a fully self-checking testbench. Simulated and
+verified in **Xilinx Vivado Simulator (XSim) 2020.2**.
 
-## Files
+> 51/51 checks passed · 0 coherence-invariant violations · 100% functional coverage
+> across all state-transition, operation, and bus-command axes.
 
-| File                    | Description                                                        |
-|--------------------------|---------------------------------------------------------------------|
-| `msi_pkg.sv`             | Shared types: MSI states (I/S/M), bus commands, parameters          |
-| `main_memory.sv`         | Single-ported shared main memory (combinational read, sync write)   |
-| `cache_core.sv`          | Per-core direct-mapped L1 cache + MSI FSM + snoop responder          |
-| `coherence_bus.sv`       | Snooping bus arbiter (round-robin) + memory tie-in                  |
-| `dual_core_msi_top.sv`   | Top level: 2× `cache_core` + `coherence_bus`                        |
-| `tb_dual_core_msi.sv`    | Self-checking testbench (12 scenarios, 45 checks)                   |
+---
+
+## Overview
+
+This project implements a classic 3-state **MSI (Modified / Shared / Invalid)**
+snooping coherence protocol between two independent L1 caches sharing a single
+memory bus. It covers the full protocol lifecycle:
+
+- Cold read/write misses (`BusRd` / `BusRdX`)
+- Shared-read fan-out with no unnecessary invalidation
+- Write-hit upgrades (`BusUpgr`, S→M)
+- Dirty-line eviction with implicit writeback (`BusWB`)
+- Remote snoop-induced downgrade (M→S) and invalidation (→I)
+- Round-robin bus arbitration under true concurrent contention
+
+It's verified with a self-checking testbench (not just visual waveform
+inspection) — every scenario asserts expected state/data/counters in-sim and
+prints `[PASS]`/`[FAIL]`, plus a background monitor that checks the MSI
+mutual-exclusion invariant on **every clock cycle** of the run.
 
 ## Architecture
 
-- **Cache**: 4-line direct-mapped, 32-bit data, 8-bit address
-  (`idx = addr[1:0]`, `tag = addr[7:2]`) — easy to resize via `msi_pkg.sv`.
-- **Coherence protocol**: classic 3-state MSI.
-  - `PrRd` miss → `BusRd`  → line goes to **S**
-  - `PrWr` hit on **S**    → `BusUpgr` → line goes to **M**, invalidates other cache
-  - `PrWr` miss             → `BusRdX` → line goes to **M**, invalidates other cache
-  - Dirty (`M`) line evicted on a conflicting-tag miss → silent `BusWB` writeback
-  - Remote `BusRd` snooping an `M` line → owner supplies data + downgrades to **S**
-  - Remote `BusRdX`/`BusUpgr` snooping any valid line → invalidates it
-- **Bus**: single shared bus, one transaction at a time, round-robin
-  arbitration between the two cores when both request simultaneously.
+```
+                 ┌───────────────────┐        ┌───────────────────┐
+                 │   cache_core #0    │        │   cache_core #1    │
+                 │  (4-line direct-   │        │  (4-line direct-   │
+                 │   mapped, MSI FSM) │        │   mapped, MSI FSM) │
+                 └─────────┬──────────┘        └──────────┬────────┘
+                           │  bus master / snoop            │
+                           └───────────────┬─────────────────┘
+                                            │
+                                 ┌──────────▼───────────┐
+                                 │    coherence_bus       │
+                                 │ (round-robin arbiter,  │
+                                 │  snoop broadcast)      │
+                                 └──────────┬───────────┘
+                                            │
+                                 ┌──────────▼───────────┐
+                                 │     main_memory        │
+                                 └────────────────────────┘
+```
 
-## Running the simulation (Icarus Verilog)
+- **Cache**: 4-line direct-mapped, 32-bit data, 8-bit address
+  (`idx = addr[1:0]`, `tag = addr[7:2]`) — resizable via `msi_pkg.sv`.
+- **Bus**: single shared bus, one transaction at a time, round-robin
+  arbitration when both cores request simultaneously.
+
+## Repository structure
+
+| File                    | Description                                                     |
+|--------------------------|-------------------------------------------------------------------|
+| `msi_pkg.sv`             | Shared types: MSI states (I/S/M), bus commands, parameters       |
+| `main_memory.sv`         | Single-ported shared main memory                                 |
+| `cache_core.sv`          | Per-core direct-mapped L1 cache + MSI FSM + snoop responder       |
+| `coherence_bus.sv`       | Snooping bus arbiter (round-robin) + memory tie-in                |
+| `dual_core_msi_top.sv`   | Top level: 2× `cache_core` + `coherence_bus`                     |
+| `tb_dual_core_msi.sv`    | Self-checking testbench (13 scenarios, 51 checks, coverage report)|
+| `msi_covergroups.sv`     | *(optional)* native SystemVerilog `covergroup`s for Vivado's Coverage Report GUI |
+| `waveforms/`             | Simulation waveform screenshot(s) — see below                    |
+| `logs/`                  | Vivado TCL console / simulation transcript — see below            |
+
+## Running it in Vivado
+
+1. Create a new project (or open an existing one) and add all `.sv` files
+   above as **simulation sources**.
+2. **Set the correct simulation top** — this matters, since Vivado can
+   otherwise pick `dual_core_msi_top` (the DUT) instead of the testbench,
+   which will simulate with everything undriven:
+   ```tcl
+   set_property top tb_dual_core_msi [get_filesets sim_1]
+   update_compile_order -fileset sim_1
+   ```
+   (Or in the GUI: Sources → Simulation Sources → right-click
+   `tb_dual_core_msi` → **Set as Top**.)
+3. Run to completion rather than a fixed time window:
+   ```tcl
+   launch_simulation
+   run -all
+   ```
+4. You should see the full `[PASS]` transcript ending in:
+   ```
+   RESULTS: 51 PASSED, 0 FAILED, 0 INVARIANT VIOLATIONS
+   STATUS: ALL TESTS PASSED - MSI coherence verified.
+   ```
+
+### Optional: native Vivado functional coverage
+
+`msi_covergroups.sv` adds real `covergroup`/`coverpoint` constructs (state
+transitions + operation outcomes) via a `bind` statement, so it attaches
+automatically to both cores without touching any other file. To use it:
+
+1. Add `msi_covergroups.sv` to your simulation sources.
+2. Flow Navigator → Simulation → Settings → Simulation → enable **Coverage**.
+3. Run as normal, then open **Coverage → Open Coverage Report**.
+
+The testbench also has its own built-in, simulator-agnostic coverage tracker
+(state transitions, operation hit/miss, bus commands) that prints a report
+directly to the transcript — no coverage database needed, and it's what
+produced the 100%-coverage result quoted above.
+
+### Also runs under Icarus Verilog
+
+Every file except `msi_covergroups.sv` (which uses `covergroup`, unsupported
+by Icarus) also compiles and runs cleanly under open-source Icarus Verilog,
+if you want a quick sanity check outside Vivado:
 
 ```bash
 iverilog -g2012 -o sim.vvp msi_pkg.sv main_memory.sv cache_core.sv \
@@ -37,40 +119,89 @@ iverilog -g2012 -o sim.vvp msi_pkg.sv main_memory.sv cache_core.sv \
 vvp sim.vvp
 ```
 
-You should see `RESULTS: 45 PASSED, 0 FAILED, 0 INVARIANT VIOLATIONS`.
+## Simulation waveform
 
-The testbench also writes `wave.vcd`, viewable with GTKWave:
-```bash
-gtkwave wave.vcd
+![MSI coherence waveform](waveforms/msi_waveform.png)
+
+*(Drop your XSim waveform screenshot at `waveforms/msi_waveform.png` — or
+export the full `.wcfg`/`.vcd` and link it here instead. The trace shows
+`dbg_state0`/`dbg_state1` walking through `I → S → M → I → M ...` in
+lock-step with `stat_transactions`, matching the scenario sequence in
+`tb_dual_core_msi.sv`.)*
+
+## Simulation log
+
+Full Vivado TCL console output / simulation transcript from a complete
+`run -all`, showing every `[PASS]` check and the final coverage report:
+
+📄 [`logs/vivado_sim_log.txt`](logs/vivado_sim_log.txt)
+
+<details>
+<summary>Click to expand a short excerpt</summary>
+
+```
+================================================================
+ Dual-Core MSI Cache Coherence -- Self-Checking Testbench
+================================================================
+-- Scenario 0: Reset state --
+  [PASS] core0 line0 reset state state=I
+  ...
+================================================================
+ RESULTS: 51 PASSED, 0 FAILED, 0 INVARIANT VIOLATIONS
+ STATUS: ALL TESTS PASSED - MSI coherence verified.
+================================================================
 ```
 
-This also works unmodified in other simulators (Questa/VCS/Xcelium) since it
-only uses standard SystemVerilog constructs.
+</details>
 
-## What the testbench actually verifies
+## What the testbench verifies
 
-1. **Reset state** — all lines start Invalid.
-2. **Cold read miss** (I→S) with correct data from memory.
-3. **Shared read** — a second core reading the same line does *not* invalidate
-   the first (both end up S).
-4. **Write hit / upgrade** (S→M via `BusUpgr`) — correctly invalidates the
-   remote sharer.
-5. **Write miss with dirty-line eviction** — forces an implicit `BusWB`
-   writeback of a *different* dirty line before installing the new one;
-   checked directly against the memory array.
-6. **Cache hit accounting** — re-reading a just-installed line hits with
-   *zero* new bus transactions (checked via a live transaction counter).
-7. **Remote read of a Modified line** — forces writeback + M→S downgrade on
-   the owner, and delivers the up-to-date dirty value to the requester.
-8. **Bus transaction count** — an end-to-end sanity check that the total
-   number of arbitrated bus transactions matches the hand-traced protocol
-   sequence.
-9. **True concurrent contention** — both cores issue a request in the exact
-   same clock cycle; verifies the round-robin arbiter serializes them
-   correctly and both eventually complete with correct data.
-10. **Background MSI invariant monitor** — runs every clock cycle for the
-    entire simulation, independent of the directed scenarios: for any
-    address held by both caches, it flags a violation if one core is in `M`
-    while the other is not `I` (the fundamental MSI mutual-exclusion rule).
+1. Reset state — all lines start Invalid.
+2. Cold read miss (I→S).
+3. Shared read — second core reading the same line doesn't invalidate the first.
+4. Write hit / upgrade (S→M via `BusUpgr`) — invalidates the remote sharer.
+5. Write miss with dirty-line eviction — implicit `BusWB` writeback, checked
+   directly against the memory array.
+6. Cache hit accounting — re-reading a line hits with zero new bus transactions.
+7. Remote read of a Modified line — forces writeback + M→S downgrade.
+8. Bus transaction count sanity check against the hand-traced protocol trace.
+9. True concurrent contention — both cores request in the same cycle;
+   round-robin arbiter serializes them correctly.
+10. Coverage-closing scenarios — added after the coverage report revealed two
+    untouched operation bins, closing them to reach 100%.
+11. Background MSI invariant monitor — runs every cycle of the whole
+    simulation, flags a violation if one core is `M` while the other isn't `I`.
 
+## Functional coverage results
 
+| Axis                        | Bins   | Covered |
+|------------------------------|--------|---------|
+| MSI state transitions         | 6      | 6 (100%) |
+| Processor operations (RD/WR × HIT/MISS × core) | 8 | 8 (100%) |
+| Bus command types              | 4      | 4 (100%) |
+
+## Notes / lessons learned
+
+- A true same-cycle-contention test surfaced a real RTL race: the bus's
+  memory-write logic wasn't gated to its `BMEM` state, so back-to-back
+  transactions with *different* snoop outcomes could let a stale
+  snoop-result register leak through and corrupt an unrelated memory
+  address. Fixed in `coherence_bus.sv`.
+- The functional coverage report caught two operation bins the original
+  directed tests never exercised (`core1:RD:HIT`, `core1:WR:MISS`) — a good
+  concrete example of coverage doing its job.
+
+## Resume bullet suggestions
+
+- Implemented a snooping-based MSI cache-coherence mechanism for a dual-core
+  system in SystemVerilog, including a round-robin bus arbiter and
+  dirty-line eviction/writeback handling, verified in Xilinx Vivado.
+- Developed a self-checking verification testbench (13 scenarios, 51
+  assertions, 100% functional coverage) validating MSI state transitions,
+  read/write hits and misses, inter-core invalidation/downgrade, and a
+  cycle-accurate background invariant monitor — which surfaced and helped
+  root-cause a real RTL race condition under concurrent bus contention.
+
+## License
+
+MIT (or update to your preference).
