@@ -106,11 +106,6 @@ vvp sim.vvp
 
 ![MSI coherence waveform](waveforms/msi_waveform.png)
 
-*(Drop your XSim waveform screenshot at `waveforms/msi_waveform.png` — or
-export the full `.wcfg`/`.vcd` and link it here instead. The trace shows
-`dbg_state0`/`dbg_state1` walking through `I → S → M → I → M ...` in
-lock-step with `stat_transactions`, matching the scenario sequence in
-`tb_dual_core_msi.sv`.)*
 
 ## Simulation log
 
